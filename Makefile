@@ -5,7 +5,10 @@ SYSTEMD_USER := /usr/lib/systemd/user
 BINARY       := sonos-linux
 VERSION      ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo "0.0.0")
 
-.PHONY: build install uninstall enable disable deb clean
+.PHONY: build install uninstall enable disable deb clean user-install user-uninstall
+
+USER_PREFIX ?= $(HOME)/.local
+USER_UNIT   := $(HOME)/.config/systemd/user
 
 build:
 	go build -ldflags="-s -w" -o $(BINARY) .
@@ -65,3 +68,20 @@ deb: build
 clean:
 	rm -f $(BINARY)
 	rm -rf $(BINARY)_*_amd64
+
+# Rootless install into ~/.local plus a user unit in ~/.config/systemd/user.
+user-install: build
+	install -d $(USER_PREFIX)/lib/sonos-linux $(USER_PREFIX)/bin $(USER_UNIT)
+	install -m 755 $(BINARY) $(USER_PREFIX)/lib/sonos-linux/$(BINARY)
+	install -m 755 tray.py $(USER_PREFIX)/lib/sonos-linux/tray.py
+	ln -sf $(USER_PREFIX)/lib/sonos-linux/$(BINARY) $(USER_PREFIX)/bin/$(BINARY)
+	install -m 644 sonos-linux.user.service $(USER_UNIT)/sonos-linux.service
+	systemctl --user daemon-reload
+	@echo "Installed to $(USER_PREFIX). Now run: systemctl --user enable --now sonos-linux"
+
+user-uninstall:
+	-systemctl --user disable --now sonos-linux 2>/dev/null
+	rm -f $(USER_UNIT)/sonos-linux.service
+	rm -rf $(USER_PREFIX)/lib/sonos-linux
+	rm -f $(USER_PREFIX)/bin/$(BINARY)
+	-systemctl --user daemon-reload 2>/dev/null

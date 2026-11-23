@@ -74,16 +74,18 @@ Expected: "Audio detected, resuming Sonos", `[stream] GET /stream/den.mp3 from
 ## Local modification: the tray
 
 Upstream `tray.py` uses `Gtk.StatusIcon`, which is XEmbed-based and therefore
-invisible on KDE Plasma 6 Wayland. This checkout is on branch `local-wayland-tray`
-with one commit, `6bc4b74`, which switches to `AppIndicator3` (StatusNotifierItem
-over D-Bus) and keeps `Gtk.StatusIcon` as a fallback when the typelib is missing.
-The stdin/stdout contract with `tray.go` is unchanged. The indicator registers as
-`org/ayatana/NotificationItem/sonos_linux`; Plasma drops new items into the
-hidden-icons chevron at the right end of the panel, so it has to be dragged out
-once through panel edit mode.
+invisible on KDE Plasma 6 Wayland. Commit `6bc4b74` switches to `AppIndicator3`
+(StatusNotifierItem over D-Bus) and keeps `Gtk.StatusIcon` as a fallback when the
+typelib is missing. The stdin/stdout contract with `tray.go` is unchanged. The
+indicator registers as `org/ayatana/NotificationItem/sonos_linux`; Plasma drops
+new items into the hidden-icons chevron at the right end of the panel, so it has
+to be dragged out once through panel edit mode.
 
-Do not `git pull` onto this branch without carrying the commit forward; upstream
-master ships the XEmbed version.
+Git layout: `origin` is the fork `venus-fire/sonos-linux`, `upstream` is
+`LuisEGR/sonos-linux`. `master` carries the two local commits and is the fork's
+default branch; `local-wayland-tray` points at the same commit. Do not
+fast-forward `master` from `upstream` without carrying these commits forward,
+because upstream ships the XEmbed version.
 
 ## Failure symptoms
 

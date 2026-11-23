@@ -130,6 +130,9 @@ func run() {
 		log.Fatalf("Failed to determine local IP: %v", err)
 	}
 
+	codec := audio.CodecFromEnv()
+	fmt.Printf("Stream codec: %s (%s)\n", codec.Name, codec.ContentType)
+
 	// Start HTTP server
 	srv := stream.NewServer()
 
@@ -143,7 +146,7 @@ func run() {
 		sanitized := audio.SanitizeName(dev.Name)
 		sinkName := audio.SinkPrefix + sanitized
 		description := "Sonos - " + dev.Name
-		streamPath := "/stream/" + sanitized + ".mp3"
+		streamPath := "/stream/" + sanitized + "." + codec.Ext
 
 		moduleIdx, err := audio.CreateSink(sinkName, description)
 		if err != nil {
@@ -151,10 +154,10 @@ func run() {
 			continue
 		}
 
-		broadcaster := stream.NewBroadcaster(description)
+		broadcaster := stream.NewBroadcaster(description, codec.ContentType)
 		srv.AddStream(streamPath, broadcaster)
 
-		ffmpegCmd, stdout, err := audio.StartEncoder(ctx, sinkName)
+		ffmpegCmd, stdout, err := audio.StartEncoder(ctx, sinkName, codec)
 		if err != nil {
 			log.Printf("Failed to start encoder for %s: %v", dev.Name, err)
 			audio.DestroySink(moduleIdx)
@@ -199,7 +202,7 @@ func run() {
 	// Tell each Sonos to play its stream
 	for _, s := range streams {
 		sanitized := audio.SanitizeName(s.device.Name)
-		streamURL := fmt.Sprintf("http://%s:%d/stream/%s.mp3", localIP, port, sanitized)
+		streamURL := fmt.Sprintf("http://%s:%d/stream/%s.%s", localIP, port, sanitized, codec.Ext)
 
 		fmt.Printf("  %s → %s\n", s.device.Name, streamURL)
 

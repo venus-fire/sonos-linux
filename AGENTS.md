@@ -36,6 +36,31 @@ interpreter and has no `gi`, so the tray only works when `python3` resolves to
 `/usr/bin/python3`. The unit sets `Environment=PATH=/usr/local/bin:/usr/bin:/bin`
 for exactly this reason.
 
+## Codec
+
+`SONOS_CODEC` selects the wire format, resolved by `audio.CodecFromEnv()` in
+`audio/codec.go`. Default is `flac`: 48 kHz, lossless, about 968 kbps of stereo,
+and no resample because 48 kHz is what the monitor runs at. `mp3-320` keeps 48
+kHz at 320 kbps, `mp3` reproduces the original upstream 192k/44.1k path, and
+`wav` is uncompressed at 1536 kbps. The device advertises all of them in
+`ConnectionManager.GetProtocolInfo`; `audio/flac` was proven live against the
+Beam here.
+
+The content type comes from the codec, so the stream path extension and the
+header always agree. If you add a codec, add its `Codec` value with `Ext`,
+`ContentType` and ffmpeg args, and confirm the speaker lists that MIME type:
+
+```
+curl -s -X POST http://<speaker>:1400/MediaRenderer/ConnectionManager/Control \
+  -H 'SOAPAction: "urn:schemas-upnp-org:service:ConnectionManager:1#GetProtocolInfo"' \
+  -H 'Content-Type: text/xml; charset="utf-8"' \
+  --data '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetProtocolInfo xmlns:u="urn:schemas-upnp-org:service:ConnectionManager:1"/></s:Body></s:Envelope>'
+```
+
+To switch on this host without editing the repo, `systemctl --user edit
+sonos-linux` and add `Environment=SONOS_CODEC=mp3` under `[Service]`. Log line
+`Stream codec: flac (audio/flac)` at startup is the confirmation.
+
 ## Rebuild and reinstall
 
 ```

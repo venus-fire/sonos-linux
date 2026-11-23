@@ -8,9 +8,9 @@ import (
 )
 
 // StartEncoder launches ffmpeg to capture audio from the named sink's monitor
-// source and encode it as a continuous MP3 stream.
-func StartEncoder(ctx context.Context, sinkName string) (*exec.Cmd, io.ReadCloser, error) {
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+// source and encode it as a continuous stream in the chosen codec.
+func StartEncoder(ctx context.Context, sinkName string, codec Codec) (*exec.Cmd, io.ReadCloser, error) {
+	args := []string{
 		"-loglevel", "error",
 		// Low-latency input
 		"-fflags", "+nobuffer",
@@ -19,17 +19,12 @@ func StartEncoder(ctx context.Context, sinkName string) (*exec.Cmd, io.ReadClose
 		"-analyzeduration", "0",
 		// PulseAudio capture
 		"-f", "pulse",
-		"-i", sinkName+".monitor",
-		// MP3 encoding - only reliable format for Sonos live streaming
-		"-acodec", "libmp3lame",
-		"-b:a", "192k",
-		"-ar", "44100",
-		"-ac", "2",
-		"-reservoir", "0",
-		"-flush_packets", "1",
-		"-f", "mp3",
-		"pipe:1",
-	)
+		"-i", sinkName + ".monitor",
+	}
+	args = append(args, codec.Args...)
+	args = append(args, "-flush_packets", "1", "pipe:1")
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	cmd.Stderr = os.Stderr
 
 	stdout, err := cmd.StdoutPipe()

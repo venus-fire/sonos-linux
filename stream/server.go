@@ -7,17 +7,19 @@ import (
 	"sync"
 )
 
-// Broadcaster fans out MP3 data to all connected HTTP clients.
+// Broadcaster fans out encoded audio to all connected HTTP clients.
 type Broadcaster struct {
-	mu      sync.RWMutex
-	clients map[chan []byte]struct{}
-	name    string
+	mu          sync.RWMutex
+	clients     map[chan []byte]struct{}
+	name        string
+	contentType string
 }
 
-func NewBroadcaster(name string) *Broadcaster {
+func NewBroadcaster(name, contentType string) *Broadcaster {
 	return &Broadcaster{
-		clients: make(map[chan []byte]struct{}),
-		name:    name,
+		clients:     make(map[chan []byte]struct{}),
+		name:        name,
+		contentType: contentType,
 	}
 }
 
@@ -53,7 +55,7 @@ func (b *Broadcaster) unsubscribe(ch chan []byte) {
 	b.mu.Unlock()
 }
 
-// Server serves MP3 streams over HTTP, one path per Sonos device.
+// Server serves encoded audio over HTTP, one path per Sonos device.
 type Server struct {
 	mux        *http.ServeMux
 	listener   net.Listener
@@ -97,7 +99,7 @@ func (s *Server) Stop() {
 
 func handleStream(w http.ResponseWriter, r *http.Request, b *Broadcaster) {
 	log.Printf("[stream] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
-	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Content-Type", b.contentType)
 	w.Header().Set("Connection", "close")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Pragma", "no-cache")

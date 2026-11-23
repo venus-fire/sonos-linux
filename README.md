@@ -32,6 +32,9 @@ copies the binary and tray script into `~/.local/lib/sonos-linux`, links
 `~/.config/systemd/user/sonos-linux.service`, and reloads the user daemon.
 `make user-uninstall` reverses all of it.
 
+A later commit makes FLAC the default codec, with `SONOS_CODEC` as the switch
+described below.
+
 `a1739fb` adds the operating notes in `AGENTS.md` and records the git layout.
 `origin` is this fork and `upstream` is the original repository. `master` and
 `local-wayland-tray` point at the same commit.
@@ -87,8 +90,38 @@ journalctl --user -u sonos-linux -f
 ```
 
 A working setup logs `Audio detected, resuming Sonos`, then
-`[stream] GET /stream/den.mp3 from <speaker ip>`, then
+`[stream] GET /stream/den.flac from <speaker ip>`, then
 `No audio, stopping Sonos` when the tone ends.
+
+## Audio codec
+
+The stream is lossless FLAC at 48 kHz by default. That was verified against this
+speaker: its own `ConnectionManager.GetProtocolInfo` advertises `audio/flac` on
+`http-get`, and a live ffmpeg FLAC pipe served chunked over HTTP plays from
+TRANSITIONING to PLAYING. FLAC costs about 968 kbps of stereo against 192 kbps
+for the upstream MP3, and it encodes faster than MP3 does, 0.27 s against 0.93 s
+per minute of audio. 48 kHz is the rate of the PipeWire monitor, so the lossless
+path also drops the resample to 44.1 kHz that the MP3 path performs.
+
+Set `SONOS_CODEC` to change it. The values are `flac`, the default, `mp3-320`
+for lossy at the source rate, `mp3` for the original upstream 192k path, and
+`wav` for uncompressed. Anything unrecognised logs a warning and falls back to
+the default.
+
+```
+systemctl --user edit sonos-linux    # then add:
+# [Service]
+# Environment=SONOS_CODEC=mp3
+```
+
+Measured on 60 seconds of 44.1/16 stereo music:
+
+| value | rate | bitrate |
+| --- | --- | --- |
+| flac | 48000 | 968 kbps |
+| mp3-320 | 48000 | 320 kbps |
+| mp3 | 44100 | 192 kbps |
+| wav | 48000 | 1536 kbps |
 
 ## Known limits
 

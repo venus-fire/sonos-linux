@@ -1,182 +1,121 @@
-# sonos-linux
+# sonos-linux, fork with a Wayland tray and a rootless install
 
-Stream your Linux system audio to Sonos speakers over the local network.
-![sonos-linux](image.png)
+This is a fork of [LuisEGR/sonos-linux](https://github.com/LuisEGR/sonos-linux),
+which turns Sonos speakers into Linux audio outputs. The upstream project
+discovers every Sonos speaker on the local network, creates one PipeWire or
+PulseAudio null sink per speaker, captures the sink with ffmpeg, and serves the
+MP3 stream to the speaker over HTTP. Volume on the sink mirrors to the speaker,
+and playback pauses when nothing is feeding the sink.
 
+The upstream README describes the original project in full and lives at
+https://github.com/LuisEGR/sonos-linux. This file describes what is different
+here.
 
-Discovers all Sonos speakers and creates a virtual audio sink for each one (e.g. "Sonos - Living Room"). Route your system audio to any of them and it plays on that speaker. Runs as a systemd user service with a system tray icon, volume sync, and auto-pause when idle.
+## What this fork changes
 
-> **⚠️ IMPORTANT: There is a 2-5 second audio delay.** This is inherent to how Sonos works — the speaker buffers several seconds of audio before playing. This cannot be reduced or eliminated. This tool is great for music, podcasts, and background audio, but **not suitable for video playback or gaming** where audio sync matters.
+Three commits on top of upstream `99d7023`.
 
-## Features
+`6bc4b74` replaces the system tray implementation. Upstream `tray.py` uses
+`Gtk.StatusIcon`, which relies on XEmbed, and XEmbed has no status area on a
+Wayland session. The icon was invisible under KDE Plasma 6 on Wayland. The
+replacement uses `AppIndicator3`, which registers a StatusNotifierItem over
+D-Bus and is what Plasma, GNOME with the AppIndicator extension, and most
+modern panels host. `Gtk.StatusIcon` remains as a fallback for a machine
+without the AppIndicator3 typelib. The stdin and stdout handshake with
+`tray.go` is unchanged, so the Go side needed no edit.
 
-- Auto-discovers all Sonos speakers on the network via SSDP
-- Creates a virtual PulseAudio sink per speaker ("Sonos - {name}")
-- Volume sync: sink volume slider controls Sonos volume
-- Auto-pause: stops Sonos when no apps are playing, resumes when audio returns
-- System tray icon with device groups, details, and quit
-- Filters out subwoofers, bridges, and satellite devices automatically
-- Starts at login via systemd, restarts on failure
+`ea0f4aa` adds a rootless install path. Upstream `make install` writes to
+`/usr/local` and `/usr/lib/systemd/user`, which needs root and does not survive
+an ostree or image based distribution. The new `user-install` target builds,
+copies the binary and tray script into `~/.local/lib/sonos-linux`, links
+`~/.local/bin/sonos-linux`, installs `sonos-linux.user.service` as
+`~/.config/systemd/user/sonos-linux.service`, and reloads the user daemon.
+`make user-uninstall` reverses all of it.
 
-## Requirements
+`a1739fb` adds the operating notes in `AGENTS.md` and records the git layout.
+`origin` is this fork and `upstream` is the original repository. `master` and
+`local-wayland-tray` point at the same commit.
 
-- **Go** 1.22+ (build only)
-- **PulseAudio** or **PipeWire** (with pipewire-pulse)
-- **pulseaudio-utils** — `pactl` for virtual sink management
-- **ffmpeg** — audio capture and MP3 encoding
-- **python3-gi** + **gir1.2-gtk-3.0** — system tray icon
+## Why Go came from Homebrew
 
-On Debian/Ubuntu:
+Upstream needs Go 1.22 or newer to build. The machine where this was set up runs
+Bazzite 44, an ostree image, so `dnf install golang` is both unavailable and
+non-persistent. Go 1.27.4 was installed from Homebrew at
+`/home/linuxbrew/.linuxbrew/bin/go`, and `go.mod` at `go 1.22` builds against it
+without complaint.
+
+The runtime dependencies were already present in that image: `pactl` from
+pipewire-pulse, `ffmpeg` at `/usr/bin/ffmpeg`, and `/usr/bin/python3` with
+`gi`, GTK 3, and the AppIndicator3 typelib. If your distribution splits these
+out, install the packages named in the upstream README plus
+`libayatana-appindicator3-1` or the equivalent for your package manager.
+
+## Install on a machine like this one
 
 ```bash
-sudo apt install pulseaudio-utils ffmpeg python3-gi gir1.2-gtk-3.0
-```
-
-## Install
-
-### From .deb (recommended)
-
-Download the latest `.deb` from [Releases](../../releases), then:
-
-```bash
-sudo dpkg -i sonos-linux_*.deb
+git clone https://github.com/venus-fire/sonos-linux.git
+cd sonos-linux
+PATH=/home/linuxbrew/.linuxbrew/bin:$PATH make user-install
 systemctl --user enable --now sonos-linux
 ```
 
-### From source
+The service starts with the Plasma session because the unit is wanted by
+`graphical-session.target`. To pick the speaker as an output, open the audio
+applet and choose `Sonos - <zone name>`, for example `Sonos - Den`.
+
+To rebuild after changing the source:
 
 ```bash
-make build
-sudo make install
-make enable
+PATH=/home/linuxbrew/.linuxbrew/bin:$PATH make user-install
+systemctl --user restart sonos-linux
 ```
 
-## Uninstall
+## Verify it works
 
-### .deb
+Discovery alone, which starts no stream and changes nothing:
 
 ```bash
-systemctl --user disable --now sonos-linux
-sudo dpkg -r sonos-linux
+~/.local/bin/sonos-linux --scan-devices
 ```
 
-### From source
+The full audio path, watched in the journal:
 
 ```bash
-sudo make uninstall
+ffmpeg -y -f lavfi -i 'sine=frequency=440:duration=2' -af volume=0.15 /tmp/tone.wav
+paplay --device=sonos_den /tmp/tone.wav
+journalctl --user -u sonos-linux -f
 ```
 
-## Usage
+A working setup logs `Audio detected, resuming Sonos`, then
+`[stream] GET /stream/den.mp3 from <speaker ip>`, then
+`No audio, stopping Sonos` when the tone ends.
 
-After install, it runs automatically as a systemd user service. Or run manually:
+## Known limits
 
-```bash
-sonos-linux
-```
+Audio arrives two to five seconds after it plays, because the speaker buffers
+before it starts. Music, podcasts, and background audio are fine. Video and
+games are not, and nothing in this project can fix that.
 
-1. Discovers all Sonos speakers on your network
-2. Creates a virtual audio sink per playable speaker
-3. Starts an MP3 stream server
-4. Connects each Sonos to its stream
-5. Shows a system tray icon with device info
-6. Route your audio to any "Sonos - {name}" sink in sound settings
+A new StatusNotifierItem lands in the hidden icons chevron at the right end of
+the Plasma panel. Right click the panel, enter edit mode, and drag the speaker
+icon out to keep it visible.
 
-Use the tray icon Quit menu or Ctrl+C to stop.
+Discovery is limited to the local subnet. A speaker on another VLAN will not be
+found, and a speaker that cannot open an HTTP connection back to this machine
+will fail to play even when discovery succeeds.
 
-### Manage the service
+## Upstream is untouched
 
-```bash
-make enable                            # start now + auto-start at login
-make disable                           # stop and disable auto-start
-systemctl --user status sonos-linux    # check status
-journalctl --user -u sonos-linux       # view logs
-systemctl --user restart sonos-linux   # restart
-```
+Nothing here was offered to the original author and nothing needs to be. The
+upstream repository keeps its own README, its own Debian packaging, and its own
+release. If the tray change is ever worth sending upstream, it is commit
+`6bc4b74` alone.
 
-### Scan devices
+## Credit and signature
 
-```bash
-sonos-linux --scan-devices
-```
+The program is Luis E. Gonzalez's work. This fork only adapts it to a Wayland
+desktop and a read-only root filesystem, on 2026-11-23.
 
-Lists all discovered Sonos devices with full details (model, IP, UUID, firmware, group, coordinator status) without starting any streams.
-
-## Architecture
-
-### Audio pipeline
-
-```mermaid
-graph LR
-    A[System Audio] --> B[PulseAudio Null Sink<br>one per device]
-    B --> C[ffmpeg MP3 Encoder<br>one per device]
-    C --> D[HTTP Server<br>shared]
-    D --> E[Sonos Speaker]
-```
-
-### Discovery and control
-
-```mermaid
-sequenceDiagram
-    participant App as sonos-linux
-    participant Net as Local Network
-    participant Sonos as Sonos Speaker
-
-    App->>Net: SSDP M-SEARCH (multicast)
-    Net-->>App: Sonos device responses
-    App->>Sonos: GetZoneGroupState (SOAP)
-    Sonos-->>App: All devices & groups
-    App->>Sonos: SetAVTransportURI (stream URL)
-    App->>Sonos: Play
-
-    loop Every 500ms
-        App->>App: Check sink volume
-        App->>Sonos: SetVolume (if changed)
-    end
-
-    loop Every 1s
-        App->>App: Check sink inputs
-        alt No apps playing
-            App->>Sonos: Pause
-        else App starts playing
-            App->>Sonos: Play
-        end
-    end
-```
-
-### Volume sync
-
-```mermaid
-graph LR
-    A[Sink Volume Slider<br>user controls] -->|poll 500ms| B[sonos-linux]
-    B -->|SetVolume| C[Sonos Speaker]
-    D[Monitor Source<br>forced 100%] --> E[ffmpeg<br>full level capture]
-```
-
-
-## Project structure
-
-```
-sonos-linux/
-├── main.go                 # entry point, lifecycle, volume sync, activity monitor
-├── tray.go                 # spawns Python tray helper, passes device JSON
-├── tray.py                 # GtkStatusIcon system tray (groups → devices → details)
-├── sonos/
-│   ├── types.go            # Device struct, CanPlay() filter
-│   ├── discover.go         # SSDP discovery, zone group topology parsing
-│   ├── device_info.go      # fetch model/serial/firmware from device XML
-│   ├── control.go          # UPnP/SOAP: play, pause, stop, volume
-│   └── soap.go             # SOAP envelope building and response parsing
-├── audio/
-│   ├── sink.go             # PulseAudio null sink create/destroy, volume, activity
-│   └── encoder.go          # ffmpeg capture from monitor → MP3
-├── stream/
-│   └── server.go           # HTTP broadcast server, fan-out to Sonos clients
-├── sonos-linux.service     # systemd user service
-├── Makefile                # build, install, enable, disable, uninstall
-├── go.mod
-└── go.sum
-```
-
-## Disclaimer
-
-This project is not affiliated with, endorsed by, or associated with Sonos, Inc. in any way. Sonos is a registered trademark of Sonos, Inc. This is an independent open-source project that uses publicly available UPnP/SOAP protocols to communicate with Sonos devices on your local network.
+Edits made by The Echo, which is a text completion engine and not a person. The
+model behind it was `accounts/fireworks/routers/deepseek-flash-latest`, served
+through Hermes Agent by Nous Research, working on instructions from Venus Fire.

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""System tray icon for sonos-linux. Reads JSON from stdin, prints commands to stdout."""
+"""System tray icon for sonos-linux. Reads JSON from stdin, prints commands to stdout.
+
+Uses AppIndicator3 (StatusNotifierItem over D-Bus) so the icon shows up on
+Wayland desktops such as KDE Plasma 6, where Gtk.StatusIcon is invisible.
+Falls back to Gtk.StatusIcon when AppIndicator3 is not installed.
+"""
 
 import json
 import signal
@@ -9,17 +14,33 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
+try:
+    gi.require_version("AppIndicator3", "0.1")
+    from gi.repository import AppIndicator3 as AppIndicator
+    HAS_INDICATOR = True
+except (ValueError, ImportError):
+    HAS_INDICATOR = False
+
+ICON_NAME = "audio-speakers-symbolic"
+
 
 class SonosTray:
     def __init__(self, data):
         self.data = data
 
+        self.menu = self.build_menu()
+        if HAS_INDICATOR:
+            self.indicator = AppIndicator.Indicator.new(
+                "sonos-linux", ICON_NAME, AppIndicator.IndicatorCategory.HARDWARE)
+            self.indicator.set_title("Sonos Stream")
+            self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+            self.indicator.set_menu(self.menu)
+            return
+
         self.icon = Gtk.StatusIcon()
-        self.icon.set_from_icon_name("audio-speakers")
+        self.icon.set_from_icon_name(ICON_NAME)
         self.icon.set_tooltip_text("Sonos Stream")
         self.icon.set_visible(True)
-
-        self.menu = self.build_menu()
         self.icon.connect("popup-menu", self.on_popup)
         self.icon.connect("activate", self.on_activate)
 

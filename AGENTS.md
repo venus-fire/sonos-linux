@@ -112,6 +112,28 @@ default branch; `local-wayland-tray` points at the same commit. Do not
 fast-forward `master` from `upstream` without carrying these commits forward,
 because upstream ships the XEmbed version.
 
+## The sink and the default output
+
+The service never sets the default sink, and it should not need to. But
+WirePlumber restores a remembered default *by node name*: if `sonos_den` was
+ever selected as the default, `~/.local/state/wireplumber/default-nodes` keeps
+it in the chain, and the moment the service creates that sink it becomes the
+default again. Everything the user plays then goes to the speaker, and this
+service faithfully makes the speaker play it.
+
+An `inspect` mismatch hides it: `pactl get-default-sink` can report the onboard
+device while the stored default is still the speaker. Check both.
+
+```
+wpctl inspect @DEFAULT_AUDIO_SINK@            # what new streams follow
+grep '^default.configured.audio.sink' ~/.local/state/wireplumber/default-nodes
+```
+
+Fix it with the sink running, not stopped: `wpctl set-default <id of the real
+sink>`. Setting it while the sink is absent looks fixed and is not, because the
+in-memory chain rewrites the file on the next default-node event. Editing the
+file by hand has the same problem.
+
 ## Failure symptoms
 
 - No sinks: discovery found nothing, or pactl is not talking to pipewire-pulse.

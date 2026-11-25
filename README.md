@@ -117,7 +117,8 @@ systemctl --user edit sonos-linux
 ```
 
 Bitrates below are measured on 60 seconds of 44.1 kHz 16-bit stereo music. The
-startup log line `Stream codec: flac (audio/flac)` confirms which one is live.
+startup log line `Stream codec: mp3-320 (audio/mpeg)` names the one that is
+live.
 
 | value | rate | bitrate | note |
 | --- | --- | --- | --- |

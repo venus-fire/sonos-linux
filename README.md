@@ -94,16 +94,21 @@ A working setup logs `Audio detected, resuming Sonos`, then
 
 ## Codec
 
-The stream is FLAC at 48 kHz by default, which is lossless and also the rate the
-PipeWire monitor runs at, so the encoder does not resample. It costs about
-968 kbps of stereo against 192 for the upstream MP3 path, and it is the cheaper
-of the two to encode: 0.27 seconds against 0.93 seconds of wall time per minute
-of audio, because lame's psychoacoustic model is the expensive part.
+The stream is MP3 at 320 kbps and 48 kHz by default. 320k keeps the monitor's
+own rate, so nothing is resampled, and the bitrate is high enough that the loss
+is not the thing you hear.
 
-Set `SONOS_CODEC` to choose another format. `flac` is the default, `mp3-320`
-keeps the source rate at 320 kbps, `mp3` reproduces the original upstream
-192k path at 44.1 kHz, and `wav` is uncompressed. An unrecognised value logs a
-warning and falls back to the default rather than silently doing nothing.
+FLAC was the default for a while, and this speaker does not hold it. The Beam
+accepts `audio/flac` and starts playing, then drops the stream every ten to
+thirty seconds; measured over forty seconds of continuous audio, MP3-320 played
+through without a single drop, including a track change in the middle. Lossless
+is available with `SONOS_CODEC=flac` for a speaker that behaves better, or for
+another Sonos model.
+
+Set `SONOS_CODEC` to choose. `mp3-320` is the default, `flac` is lossless,
+`mp3` reproduces the original upstream 192k path at 44.1 kHz, and `wav` is
+uncompressed. An unrecognised value logs a warning and falls back to the
+default rather than silently doing nothing.
 
 ```bash
 systemctl --user edit sonos-linux
@@ -114,12 +119,12 @@ systemctl --user edit sonos-linux
 Bitrates below are measured on 60 seconds of 44.1 kHz 16-bit stereo music. The
 startup log line `Stream codec: flac (audio/flac)` confirms which one is live.
 
-| value | rate | bitrate |
-| --- | --- | --- |
-| flac | 48000 | 968 kbps |
-| mp3-320 | 48000 | 320 kbps |
-| mp3 | 44100 | 192 kbps |
-| wav | 48000 | 1536 kbps |
+| value | rate | bitrate | note |
+| --- | --- | --- | --- |
+| mp3-320 | 48000 | 320 kbps | default, stable |
+| flac | 48000 | 968 kbps | lossless, drops on this speaker |
+| mp3 | 44100 | 192 kbps | original upstream path |
+| wav | 48000 | 1536 kbps | uncompressed |
 
 Adding a format means adding a `Codec` value in `audio/codec.go` with its ffmpeg
 arguments, path extension and MIME type, and confirming the speaker lists that

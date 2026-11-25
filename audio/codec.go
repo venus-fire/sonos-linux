@@ -80,7 +80,14 @@ var CodecWAV = Codec{
 }
 
 // DefaultCodec is what runs when SONOS_CODEC is unset.
-var DefaultCodec = CodecFLAC
+//
+// FLAC was the default for a while because the speaker advertises it and the
+// stream is lossless, but the Beam drops a long FLAC stream. Measured on this
+// speaker: playback cycles PLAYING, then STOPPED every ten to thirty seconds,
+// and only a re-attach revives it. MP3 at 320k played forty seconds straight
+// with a track change in the middle and never dropped. MP3-320 also keeps the
+// 48 kHz monitor rate, so it still avoids the resample the 192k path does.
+var DefaultCodec = CodecMP3320
 
 // CodecFromEnv resolves SONOS_CODEC. Anything unrecognised falls back to
 // DefaultCodec and says so, because a silent fallback reads as a working
@@ -88,12 +95,12 @@ var DefaultCodec = CodecFLAC
 func CodecFromEnv() Codec {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("SONOS_CODEC")))
 	switch raw {
-	case "", "flac":
+	case "", "mp3-320", "mp3_320", "mp3320":
+		return CodecMP3320
+	case "flac":
 		return CodecFLAC
 	case "mp3":
 		return CodecMP3
-	case "mp3-320", "mp3_320", "mp3320":
-		return CodecMP3320
 	case "wav":
 		return CodecWAV
 	}

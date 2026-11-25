@@ -39,10 +39,16 @@ for exactly this reason.
 ## Codec
 
 `SONOS_CODEC` selects the wire format, resolved by `audio.CodecFromEnv()` in
-`audio/codec.go`. Default is `flac`: 48 kHz, lossless, about 968 kbps of stereo,
-and no resample because 48 kHz is what the monitor runs at. `mp3-320` keeps 48
-kHz at 320 kbps, `mp3` reproduces the original upstream 192k/44.1k path, and
-`wav` is uncompressed at 1536 kbps. The device advertises all of them in
+`audio/codec.go`. Default is `mp3-320`: 48 kHz, 320 kbps, no resample because 48
+kHz is what the monitor runs at. `flac` is lossless at about 968 kbps but the
+Beam drops a long FLAC stream every ten to thirty seconds, so it is not the
+default; `mp3` reproduces the original upstream 192k/44.1k path, and `wav` is
+uncompressed at 1536 kbps.
+
+Measured on this speaker over forty seconds of continuous audio with a track
+change in the middle: mp3-320 held PLAYING throughout, flac cycled back to
+STOPPED repeatedly and only a re-attach revived it. If FLAC is ever made the
+default again, run that test first. The device advertises all of them in
 `ConnectionManager.GetProtocolInfo`; `audio/flac` was proven live against the
 Beam here.
 

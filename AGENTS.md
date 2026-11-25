@@ -134,6 +134,33 @@ sink>`. Setting it while the sink is absent looks fixed and is not, because the
 in-memory chain rewrites the file on the next default-node event. Editing the
 file by hand has the same problem.
 
+## Pausing, resuming and the pieces that break
+
+Three rules, each learned from a failure on this host.
+
+- **A paused Sonos drops its HTTP connection**, so a bare `Play` resumes
+  nothing. Every resume goes through `attachAndPlay`, which re-sets the URI when
+  the broadcaster has no clients.
+- **Silence starves the speaker even when the app has not paused it.** A null
+  sink whose inputs are idle produces a trickle of FLAC, the speaker's buffer
+  drains, and it stops on its own while the app still believes it is playing.
+  `monitorActivity` therefore asks the speaker for its transport state every ten
+  seconds while audio is flowing, and re-attaches when it is not PLAYING or
+  TRANSITIONING. Without that the speaker stops on the first gap between tracks
+  and stays stopped.
+- **A track change is not a stop.** Players close and reopen their stream
+  between tracks, so a quiet tick means nothing. `SONOS_IDLE_GRACE` seconds of
+  no input, four by default, are required before the speaker is paused.
+
+Recovery from a state the process cannot fix in place, which is a suspend, a
+PipeWire restart or a vanished sink: the encoder pipe ends or `SinkExists`
+fails, and the process exits so systemd rebuilds the sink, the encoder and the
+stream in the startup order. Rebuilding in place drifts from that path.
+
+`StartEncoder` also waits for the first byte, up to three attempts. A freshly
+created null sink can leave ffmpeg attached, visible in the mixer as a running
+capture node, producing nothing at all.
+
 ## Failure symptoms
 
 - No sinks: discovery found nothing, or pactl is not talking to pipewire-pulse.

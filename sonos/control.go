@@ -42,6 +42,24 @@ func (p *Player) Play() error {
 	return err
 }
 
+// TransportState returns the renderer's CurrentTransportState, for example
+// PLAYING, PAUSED_PLAYBACK, STOPPED or TRANSITIONING. An empty string means the
+// query failed.
+func (p *Player) TransportState() string {
+	res, err := soapCall(p.coordinatorIP(),
+		"/MediaRenderer/AVTransport/Control",
+		"AVTransport",
+		"GetTransportInfo",
+		[]soapArg{
+			{"InstanceID", "0"},
+		},
+	)
+	if err != nil {
+		return ""
+	}
+	return res["CurrentTransportState"]
+}
+
 func (p *Player) Stop() error {
 	_, err := soapCall(p.coordinatorIP(),
 		"/MediaRenderer/AVTransport/Control",

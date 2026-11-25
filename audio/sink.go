@@ -117,7 +117,24 @@ func GetSinkIndex(sinkName string) string {
 	return ""
 }
 
-// HasSinkInputs returns true if any applications are currently playing to the named sink.
+// SinkExists reports whether the named sink is still present. A suspend or a
+// PipeWire restart can take it away while this process keeps running.
+func SinkExists(sinkName string) bool {
+	out, err := exec.Command("pactl", "list", "short", "sinks").Output()
+	if err != nil {
+		return true // cannot tell; do not restart the world on a shell hiccup
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) > 1 && fields[1] == sinkName {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSinkInputs returns true if any applications are currently playing to the
+// named sink.
 func HasSinkInputs(sinkName string) bool {
 	idx := GetSinkIndex(sinkName)
 	if idx == "" {

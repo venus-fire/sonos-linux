@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -37,11 +38,13 @@ func ensureDeps() {
 }
 
 type deviceStream struct {
-	device    *sonos.Device
-	sinkName  string
-	moduleIdx int
-	ffmpegCmd *exec.Cmd
-	player    *sonos.Player
+	device      *sonos.Device
+	sinkName    string
+	moduleIdx   int
+	ffmpegCmd   *exec.Cmd
+	player      *sonos.Player
+	broadcaster *stream.Broadcaster
+	streamURL   string
 }
 
 func main() {
@@ -172,17 +175,28 @@ func run() {
 					broadcaster.Write(buf[:n])
 				}
 				if err != nil {
+					// The encoder ended. Normally that is a suspend, a
+					// PipeWire restart or a dead sink, and the process is
+					// past saving: the stream server, the sink and the
+					// speaker's URI all have to be built again. Let systemd
+					// do that instead of rebuilding in place, which is how
+					// this drifts from the startup path.
+					if ctx.Err() == nil {
+						log.Printf("[%s] encoder stopped: %v, restarting", dev.Name, err)
+						os.Exit(1)
+					}
 					return
 				}
 			}
 		}()
 
 		streams = append(streams, deviceStream{
-			device:    dev,
-			sinkName:  sinkName,
-			moduleIdx: moduleIdx,
-			ffmpegCmd: ffmpegCmd,
-			player:    sonos.NewPlayer(dev),
+			device:      dev,
+			sinkName:    sinkName,
+			moduleIdx:   moduleIdx,
+			ffmpegCmd:   ffmpegCmd,
+			player:      sonos.NewPlayer(dev),
+			broadcaster: broadcaster,
 		})
 
 		fmt.Printf("  Sonos - %-20s  sink: %s\n", dev.Name, sinkName)
@@ -200,28 +214,24 @@ func run() {
 	time.Sleep(time.Second)
 
 	// Tell each Sonos to play its stream
-	for _, s := range streams {
+	for i := range streams {
+		s := &streams[i]
 		sanitized := audio.SanitizeName(s.device.Name)
-		streamURL := fmt.Sprintf("http://%s:%d/stream/%s.%s", localIP, port, sanitized, codec.Ext)
+		s.streamURL = fmt.Sprintf("http://%s:%d/stream/%s.%s",
+			localIP, port, sanitized, codec.Ext)
 
-		fmt.Printf("  %s → %s\n", s.device.Name, streamURL)
+		fmt.Printf("  %s → %s\n", s.device.Name, s.streamURL)
 
 		s.player.Stop()
-
-		if err := s.player.SetAVTransportURI(streamURL); err != nil {
-			log.Printf("Failed to set URI on %s: %v", s.device.Name, err)
-			continue
-		}
-		if err := s.player.Play(); err != nil {
-			log.Printf("Failed to start playback on %s: %v", s.device.Name, err)
-			continue
-		}
+		attachAndPlay(s)
 	}
 
-	// Start volume sync and activity monitor for each stream
-	for _, s := range streams {
-		go syncVolume(ctx, s)
+	// Start volume sync, activity monitor and the liveness check for each stream
+	for i := range streams {
+		s := &streams[i]
+		go syncVolume(ctx, *s)
 		go monitorActivity(ctx, s)
+		go supervise(ctx, s)
 	}
 
 	// Start system tray
@@ -291,28 +301,105 @@ func syncVolume(ctx context.Context, s deviceStream) {
 	}
 }
 
-// monitorActivity watches for sink inputs. When no apps are playing to our
-// sink, stop Sonos playback. When an app starts playing, resume.
-func monitorActivity(ctx context.Context, s deviceStream) {
+// attachAndPlay points the speaker at our stream and starts it.
+//
+// Re-attaching is the part that matters. A paused Sonos closes its HTTP
+// connection, so a bare Play resumes a stream that no longer exists and the
+// speaker sits there stopped. With no client attached, the URI has to be set
+// again first.
+func attachAndPlay(s *deviceStream) {
+	if s.broadcaster == nil || s.broadcaster.Clients() == 0 {
+		if err := s.player.SetAVTransportURI(s.streamURL); err != nil {
+			log.Printf("Failed to set URI on %s: %v", s.device.Name, err)
+			return
+		}
+	}
+	if err := s.player.Play(); err != nil {
+		log.Printf("Failed to start playback on %s: %v", s.device.Name, err)
+	}
+}
+
+// idleGrace is how long the sink may have no input before the speaker is
+// paused. A player swapping tracks drops its stream and opens a new one, and
+// pausing on the first quiet tick made the speaker stop between tracks.
+func idleGrace() time.Duration {
+	if v := os.Getenv("SONOS_IDLE_GRACE"); v != "" {
+		if secs, err := strconv.ParseFloat(v, 64); err == nil && secs >= 0 {
+			return time.Duration(secs * float64(time.Second))
+		}
+	}
+	return 4 * time.Second
+}
+
+// monitorActivity watches for sink inputs. When no apps have played to our sink
+// for the grace period, pause the speaker. When an app starts playing, resume.
+func monitorActivity(ctx context.Context, s *deviceStream) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	grace := idleGrace()
 	wasActive := true // assume active on startup since we just called Play
+	var quietSince time.Time
+	lastHeal := time.Now()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			active := audio.HasSinkInputs(s.sinkName)
-			if active && !wasActive {
-				log.Printf("[%s] Audio detected, resuming Sonos", s.device.Name)
-				s.player.Play()
-			} else if !active && wasActive {
-				log.Printf("[%s] No audio, stopping Sonos", s.device.Name)
-				s.player.Pause()
+			if audio.HasSinkInputs(s.sinkName) {
+				quietSince = time.Time{}
+				if !wasActive {
+					log.Printf("[%s] Audio detected, resuming Sonos", s.device.Name)
+					attachAndPlay(s)
+					wasActive = true
+					lastHeal = time.Now()
+				} else if time.Since(lastHeal) >= 10*time.Second {
+					// The speaker can end up stopped or paused while audio
+					// keeps flowing, which is what a dropped stream looks
+					// like from here. Point it back at the stream instead of
+					// waiting for an input transition that never comes.
+					switch st := s.player.TransportState(); st {
+					case "", "PLAYING", "TRANSITIONING":
+					default:
+						log.Printf("[%s] speaker is %s while audio plays, re-attaching",
+							s.device.Name, st)
+						attachAndPlay(s)
+					}
+					lastHeal = time.Now()
+				}
+				continue
 			}
-			wasActive = active
+			if quietSince.IsZero() {
+				quietSince = time.Now()
+				continue
+			}
+			if wasActive && time.Since(quietSince) >= grace {
+				log.Printf("[%s] Silent for %.0fs, pausing Sonos",
+					s.device.Name, grace.Seconds())
+				s.player.Pause()
+				wasActive = false
+			}
+		}
+	}
+}
+
+// supervise notices the states this process cannot recover from in place: the
+// sink disappeared, which is what a suspend or a PipeWire restart looks like,
+// or the speaker has gone away. Exiting lets systemd rebuild the sink, the
+// encoder and the stream in the same order the startup path does.
+func supervise(ctx context.Context, s *deviceStream) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !audio.SinkExists(s.sinkName) {
+				log.Printf("[%s] sink %s disappeared, restarting", s.device.Name, s.sinkName)
+				os.Exit(1)
+			}
 		}
 	}
 }

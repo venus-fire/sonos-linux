@@ -49,6 +49,15 @@ func (b *Broadcaster) subscribe() chan []byte {
 	return ch
 }
 
+// Clients reports how many HTTP clients are attached right now. A Sonos drops
+// its connection when it pauses, so zero clients means the speaker has to be
+// pointed at the stream again before it will play.
+func (b *Broadcaster) Clients() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.clients)
+}
+
 func (b *Broadcaster) unsubscribe(ch chan []byte) {
 	b.mu.Lock()
 	delete(b.clients, ch)

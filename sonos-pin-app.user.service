@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep chosen apps on the Sonos sink
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/bin/sonos-pin-app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -74,8 +74,10 @@ user-install: build
 	install -d $(USER_PREFIX)/lib/sonos-linux $(USER_PREFIX)/bin $(USER_UNIT)
 	install -m 755 $(BINARY) $(USER_PREFIX)/lib/sonos-linux/$(BINARY)
 	install -m 755 tray.py $(USER_PREFIX)/lib/sonos-linux/tray.py
+	install -m 755 extras/sonos-pin-app.py $(USER_PREFIX)/bin/sonos-pin-app
 	ln -sf $(USER_PREFIX)/lib/sonos-linux/$(BINARY) $(USER_PREFIX)/bin/$(BINARY)
 	install -m 644 sonos-linux.user.service $(USER_UNIT)/sonos-linux.service
+	install -m 644 sonos-pin-app.user.service $(USER_UNIT)/sonos-pin-app.service
 	systemctl --user daemon-reload
 	@echo "Installed to $(USER_PREFIX). Now run: systemctl --user enable --now sonos-linux"
 

@@ -161,6 +161,28 @@ stream in the startup order. Rebuilding in place drifts from that path.
 created null sink can leave ffmpeg attached, visible in the mixer as a running
 capture node, producing nothing at all.
 
+## One application on the speaker
+
+Routing a single app to the speaker means the default sink stays on the local
+device and that app's stream is pinned to `sonos_den`. Doing that by hand lasts
+one track: a player opens a new stream per track, and a stream with no recorded
+target follows the default.
+
+`extras/sonos-pin-app.py`, installed as `~/.local/bin/sonos-pin-app` and run by
+`sonos-pin-app.service`, does the pinning. It reads
+`~/.config/sonos-pin-app.json`:
+
+```json
+{"target": "sonos_den", "apps": ["Strawberry"]}
+```
+
+It watches `pactl subscribe` and re-checks every five seconds, moving a matching
+stream whenever it is not already on the target, and does nothing while the sink
+is absent. Add an application name to `apps` and restart the service.
+
+`make user-install` installs both units. `sonos-pin-app.service` is wanted by
+`graphical-session.target`, so it comes back with the session.
+
 ## Failure symptoms
 
 - No sinks: discovery found nothing, or pactl is not talking to pipewire-pulse.
